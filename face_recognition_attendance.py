@@ -9,7 +9,7 @@ from datetime import datetime
 # ⚙️ Ghi lịch sử điểm danh (chống spam)
 # ===============================
 last_mark_times = {}
-DELAY_SECONDS = 20  # khoảng cách tối thiểu giữa 2 lần lưu (giây)
+DELAY_SECONDS = 30  # Khoảng cách tối thiểu giữa 2 lần lưu (giây)
 
 def mark_attendance(name):
     """Ghi lịch sử điểm danh vào file CSV"""
@@ -42,7 +42,6 @@ def mark_attendance(name):
 
     print(f"✅ Đã lưu điểm danh: {name} ({date} {time})")
 
-
 # ===============================
 # 🎥 Nhận diện & điểm danh
 # ===============================
@@ -53,27 +52,29 @@ def start_attendance():
         return
 
     print("📂 Đang tải dataset...")
-    images, classNames = [], []
-    myList = os.listdir(path)
-    for cl in myList:
-        curImg = cv2.imread(os.path.join(path, cl))
-        if curImg is not None:
-            images.append(curImg)
-            classNames.append(os.path.splitext(cl)[0])
-    print(f"✅ Đã tải {len(images)} khuôn mặt: {classNames}")
+    encode_dict = {}  # { 'tuan': [encode1, encode2, ...], ... }
 
-    encodeListKnown = []
-    for img in images:
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encodes = face_recognition.face_encodings(img_rgb)
+    for filename in os.listdir(path):
+        file_path = os.path.join(path, filename)
+        if not filename.lower().endswith(('.jpg', '.png', '.jpeg')):
+            continue
+
+        name = os.path.splitext(filename)[0].split('_')[0]  # tách tên trước dấu _
+        img = cv2.imread(file_path)
+        if img is None:
+            continue
+
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        encodes = face_recognition.face_encodings(rgb)
         if len(encodes) > 0:
-            encodeListKnown.append(encodes[0])
-    print("✅ Mã hoá khuôn mặt hoàn tất.")
+            encode_dict.setdefault(name, []).append(encodes[0])
+
+    print(f"✅ Đã tải {len(encode_dict)} người: {list(encode_dict.keys())}")
 
     cap = cv2.VideoCapture(0)
     print("🎥 Camera đang mở. Nhấn Q để thoát.")
 
-    threshold = 0.45  # càng thấp thì càng khắt khe (0.4–0.5 là hợp lý)
+    threshold = 0.35 # càng thấp thì càng khắt khe
 
     while True:
         success, img = cap.read()
@@ -88,27 +89,32 @@ def start_attendance():
         encodesCurFrame = face_recognition.face_encodings(imgS, facesCurFrame)
 
         for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
-            faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
+            best_name = "Không xác định"
+            min_distance = 1.0
 
-            if len(faceDis) > 0:
-                matchIndex = np.argmin(faceDis)
-                best_match_distance = faceDis[matchIndex]
+            # So sánh với từng người
+            for name, encodes in encode_dict.items():
+                distances = face_recognition.face_distance(encodes, encodeFace)
+                avg_distance = np.mean(distances)
+                if avg_distance < min_distance:
+                    min_distance = avg_distance
+                    best_name = name
 
-                if best_match_distance < threshold:
-                    name = classNames[matchIndex]
-                    color = (0, 255, 0)  
-                    mark_attendance(name)
-                else:
-                    name = "Khong xac dinh"
-                    color = (0, 0, 255)  
+            # Kiểm tra ngưỡng
+            if min_distance < threshold:
+                color = (0, 255, 0)
+                mark_attendance(best_name)
+            else:
+                best_name = "Không xác định"
+                color = (0, 0, 255)
 
-                # Vẽ khung và ghi tên
-                y1, x2, y2, x1 = faceLoc
-                y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-                cv2.rectangle(img, (x1, y2 - 35), (x2, y2), color, cv2.FILLED)
-                cv2.putText(img, name.upper(), (x1 + 6, y2 - 6),
-                            cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+            # Vẽ khung
+            y1, x2, y2, x1 = faceLoc
+            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), color, cv2.FILLED)
+            cv2.putText(img, best_name.upper(), (x1 + 6, y2 - 6),
+                        cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
 
         cv2.imshow('Face Attendance', img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
