@@ -2,22 +2,25 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import pandas as pd
 import os
-from face_recognition_attendance import start_attendance
+import cv2
 from datetime import datetime
+from face_recognition_attendance import start_attendance
 
 # ===============================
 # 📘 Hàm tải dữ liệu CSV
 # ===============================
 def load_attendance_data():
     if os.path.exists('attendance.csv') and os.path.getsize('attendance.csv') > 0:
-        df = pd.read_csv('attendance.csv')
-        return df
+        try:
+            df = pd.read_csv('attendance.csv')
+            return df
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame(columns=["Name", "Date", "Time"])
     else:
-        messagebox.showinfo("Thông báo", "Chưa có dữ liệu điểm danh.")
         return pd.DataFrame(columns=["Name", "Date", "Time"])
 
 # ===============================
-# 📗 Hàm hiển thị dữ liệu vào bảng
+# 📗 Cập nhật bảng danh sách
 # ===============================
 def update_table():
     for item in tree.get_children():
@@ -27,7 +30,33 @@ def update_table():
         tree.insert("", tk.END, values=(row["Name"], row["Date"], row["Time"]))
 
 # ===============================
-# 📷 Hàm mở camera điểm danh
+# ♻️ Xóa lịch sử (gọi khi bấm "Làm mới danh sách")
+# ===============================
+def clear_history():
+    # Hỏi xác nhận người dùng
+    confirm = messagebox.askyesno("Xác nhận xóa", 
+                                  "Bạn có chắc muốn xoá toàn bộ lịch sử điểm danh không?\n\n"
+                                  "Hành động này không thể hoàn tác.\n\n"
+                                  "Nếu muốn lưu trước, hãy bấm 'Xuất File CSV'.")
+    if not confirm:
+        return
+
+    file = 'attendance.csv'
+    try:
+        # Option 1: ghi file trống với header
+        df_empty = pd.DataFrame(columns=["Name", "Date", "Time"])
+        df_empty.to_csv(file, index=False)
+        # Nếu bạn muốn hoàn toàn xoá file thay vì ghi trống, bạn có thể dùng:
+        # if os.path.exists(file): os.remove(file)
+        messagebox.showinfo("Hoàn tất", "Đã xóa lịch sử điểm danh.")
+    except Exception as e:
+        messagebox.showerror("Lỗi", f"Xóa lịch sử thất bại:\n{e}")
+
+    # Cập nhật lại bảng trên giao diện
+    update_table()
+
+# ===============================
+# 📷 Mở camera điểm danh
 # ===============================
 def start_camera():
     messagebox.showinfo("Điểm danh", "Camera đang mở, nhấn Q để thoát.")
@@ -35,7 +64,7 @@ def start_camera():
     update_table()
 
 # ===============================
-# 💾 Hàm xuất file CSV (sao lưu)
+# 💾 Xuất file CSV sao lưu
 # ===============================
 def export_csv():
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -48,11 +77,49 @@ def export_csv():
         messagebox.showerror("Lỗi", f"Không thể xuất file CSV:\n{e}")
 
 # ===============================
+# 🧍 Thêm khuôn mặt mới vào dataset
+# ===============================
+def register_new_face():
+    name = entry_name.get().strip()
+    if not name:
+        messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập tên trước khi thêm.")
+        return
+
+    save_path = os.path.join("dataset", f"{name}.jpg")
+    os.makedirs("dataset", exist_ok=True)
+
+    cap = cv2.VideoCapture(0)
+    messagebox.showinfo("Chụp ảnh", "Nhấn phím [S] để chụp và lưu ảnh, [Q] để hủy.")
+
+    while True:
+        success, img = cap.read()
+        if not success:
+            messagebox.showerror("Lỗi camera", "Không thể mở camera.")
+            break
+
+        cv2.imshow("Đăng ký khuôn mặt mới", img)
+        key = cv2.waitKey(1) & 0xFF
+
+        # Nhấn S để lưu ảnh
+        if key == ord('s'):
+            cv2.imwrite(save_path, img)
+            messagebox.showinfo("Thành công", f"Đã lưu ảnh mới: {save_path}\nKhuôn mặt này sẽ được nhận trong lần điểm danh kế tiếp.")
+            break
+
+        # Nhấn Q để thoát
+        elif key == ord('q'):
+            messagebox.showinfo("Hủy", "Đã hủy đăng ký khuôn mặt.")
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+# ===============================
 # 🌈 Giao diện chính
 # ===============================
 root = tk.Tk()
 root.title("📸 Hệ thống điểm danh bằng khuôn mặt")
-root.geometry("800x600")
+root.geometry("850x650")
 root.configure(bg="#eaf4fc")
 
 # ===============================
@@ -64,7 +131,23 @@ title_label = tk.Label(root, text="HỆ THỐNG ĐIỂM DANH BẰNG KHUÔN MẶT
 title_label.pack(fill=tk.X)
 
 # ===============================
-# 🔘 Các nút chức năng
+# 🧍‍♂️ Khu vực thêm người mới
+# ===============================
+frame_add = tk.LabelFrame(root, text="➕ Thêm người mới", bg="#eaf4fc",
+                          font=("Segoe UI", 12, "bold"), padx=15, pady=10)
+frame_add.pack(padx=20, pady=10, fill=tk.X)
+
+lbl_name = tk.Label(frame_add, text="Tên:", bg="#eaf4fc", font=("Segoe UI", 11))
+lbl_name.grid(row=0, column=0, padx=10)
+
+entry_name = ttk.Entry(frame_add, width=30, font=("Segoe UI", 11))
+entry_name.grid(row=0, column=1, padx=10)
+
+btn_register = ttk.Button(frame_add, text="📸 Thêm khuôn mặt", command=register_new_face)
+btn_register.grid(row=0, column=2, padx=10)
+
+# ===============================
+# 🔘 Các nút chức năng chính
 # ===============================
 button_frame = tk.Frame(root, bg="#eaf4fc")
 button_frame.pack(pady=15)
@@ -75,7 +158,8 @@ style.configure("TButton", font=("Segoe UI", 11), padding=6)
 btn_start = ttk.Button(button_frame, text="▶ Mở Camera Điểm Danh", command=start_camera)
 btn_start.grid(row=0, column=0, padx=10)
 
-btn_refresh = ttk.Button(button_frame, text="🔄 Làm mới danh sách", command=update_table)
+# NOTE: nút "Làm mới danh sách" giờ gọi clear_history (xóa lịch sử).
+btn_refresh = ttk.Button(button_frame, text="🔄 Làm mới danh sách", command=clear_history)
 btn_refresh.grid(row=0, column=1, padx=10)
 
 btn_export = ttk.Button(button_frame, text="💾 Xuất File CSV", command=export_csv)
