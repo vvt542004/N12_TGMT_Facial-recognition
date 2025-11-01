@@ -1,0 +1,9 @@
+# Bỏ qua thư mục môi trường ảo
+venv/
+
+# Bỏ qua mô hình lớn
+*.h5
+*.pkl
+*.pt
+*.onnx
+*.pb
