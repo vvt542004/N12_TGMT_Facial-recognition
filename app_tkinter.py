@@ -1,202 +1,336 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import pandas as pd
+import numpy as np
 import os
-import cv2
 from datetime import datetime
 from face_recognition_attendance import start_attendance
 
 # ===============================
-# 📘 Hàm tải dữ liệu CSV
+# ⚙️ Cấu hình hệ thống
 # ===============================
-def load_attendance_data():
-    if os.path.exists('attendance.csv') and os.path.getsize('attendance.csv') > 0:
-        try:
-            df = pd.read_csv('attendance.csv')
-            return df
-        except pd.errors.EmptyDataError:
-            return pd.DataFrame(columns=["Name", "Date", "Time"])
-    else:
-        return pd.DataFrame(columns=["Name", "Date", "Time"])
+ADMIN_PASSWORD = "admin123"
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+subjects = ["Xử lý ảnh", "Nhúng IoT", "Thị giác máy tính", "AI cơ bản"]
+MODEL_DIR = "face_models_facenet"
+EMBEDDINGS_NPZ = os.path.join(MODEL_DIR, "faces_embeddings_facenet.npz")
+
+# Lưu trạng thái từng môn học
+ACTIVE_SESSIONS = {s: {"active": False, "start": None, "end": None} for s in subjects}
 
 # ===============================
-# 📗 Cập nhật bảng danh sách
+# 📂 Đọc danh sách sinh viên từ embeddings
 # ===============================
-def update_table():
-    for item in tree.get_children():
-        tree.delete(item)
-    df = load_attendance_data()
-    for _, row in df.iterrows():
-        tree.insert("", tk.END, values=(row["Name"], row["Date"], row["Time"]))
-
-# ===============================
-# ♻️ Xóa lịch sử (gọi khi bấm "Làm mới danh sách")
-# ===============================
-def clear_history():
-    # Hỏi xác nhận người dùng
-    confirm = messagebox.askyesno("Xác nhận xóa", 
-                                  "Bạn có chắc muốn xoá toàn bộ lịch sử điểm danh không?\n\n"
-                                  "Hành động này không thể hoàn tác.\n\n"
-                                  "Nếu muốn lưu trước, hãy bấm 'Xuất File CSV'.")
-    if not confirm:
-        return
-
-    file = 'attendance.csv'
+student_names = []
+if os.path.exists(EMBEDDINGS_NPZ):
     try:
-        # Option 1: ghi file trống với header
-        df_empty = pd.DataFrame(columns=["Name", "Date", "Time"])
-        df_empty.to_csv(file, index=False)
-        # Nếu bạn muốn hoàn toàn xoá file thay vì ghi trống, bạn có thể dùng:
-        # if os.path.exists(file): os.remove(file)
-        messagebox.showinfo("Hoàn tất", "Đã xóa lịch sử điểm danh.")
+        npz = np.load(EMBEDDINGS_NPZ, allow_pickle=True)
+        labels = np.unique(npz["labels"])
+        student_names = sorted(labels.tolist())
+        print("📂 Danh sách sinh viên đã tải:")
+        for name in student_names:
+            print("   -", name)
     except Exception as e:
-        messagebox.showerror("Lỗi", f"Xóa lịch sử thất bại:\n{e}")
+        print("⚠️ Không thể tải danh sách sinh viên:", e)
+else:
+    print("⚠️ Không tìm thấy file embeddings.")
 
-    # Cập nhật lại bảng trên giao diện
-    update_table()
-
-# ===============================
-# 📷 Mở camera điểm danh
-# ===============================
-def start_camera():
-    messagebox.showinfo("Điểm danh", "Camera đang mở, nhấn Q để thoát.")
-    start_attendance()
-    update_table()
 
 # ===============================
-# 💾 Xuất file CSV sao lưu
+# 🌟 Ứng dụng chính (1 cửa sổ, nhiều frame)
 # ===============================
-def export_csv():
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    new_file = f"attendance_backup_{now}.csv"
-    try:
-        df = load_attendance_data()
-        df.to_csv(new_file, index=False)
-        messagebox.showinfo("Thành công", f"Đã sao lưu file: {new_file}")
-    except Exception as e:
-        messagebox.showerror("Lỗi", f"Không thể xuất file CSV:\n{e}")
+class AttendanceApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Hệ thống điểm danh bằng khuôn mặt")
+        self.geometry("900x600")
+        self.resizable(False, False)
 
-# ===============================
-# 🧍 Thêm khuôn mặt mới vào dataset
-# ===============================
-def register_new_face():
-    name = entry_name.get().strip()
-    if not name:
-        messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập tên trước khi thêm.")
-        return
+        container = tk.Frame(self)
+        container.pack(fill="both", expand=True)
 
-    save_path = os.path.join("dataset", f"{name}.jpg")
-    os.makedirs("dataset", exist_ok=True)
+        self.frames = {}
+        for F in (LoginFrame, AdminFrame, StudentFrame):
+            frame = F(container, self)
+            self.frames[F] = frame
+            frame.grid(row=0, column=0, sticky="nsew")
 
-    cap = cv2.VideoCapture(0)
-    messagebox.showinfo("Chụp ảnh", "Nhấn phím [S] để chụp và lưu ảnh, [Q] để hủy.")
+        self.show_frame(LoginFrame)
 
-    while True:
-        success, img = cap.read()
-        if not success:
-            messagebox.showerror("Lỗi camera", "Không thể mở camera.")
-            break
+    def show_frame(self, cont):
+        self.frames[cont].tkraise()
 
-        cv2.imshow("Đăng ký khuôn mặt mới", img)
-        key = cv2.waitKey(1) & 0xFF
-
-        # Nhấn S để lưu ảnh
-        if key == ord('s'):
-            cv2.imwrite(save_path, img)
-            messagebox.showinfo("Thành công", f"Đã lưu ảnh mới: {save_path}\nKhuôn mặt này sẽ được nhận trong lần điểm danh kế tiếp.")
-            break
-
-        # Nhấn Q để thoát
-        elif key == ord('q'):
-            messagebox.showinfo("Hủy", "Đã hủy đăng ký khuôn mặt.")
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
 
 # ===============================
-# 🌈 Giao diện chính
+# 📘 Giao diện đăng nhập
 # ===============================
-root = tk.Tk()
-root.title("📸 Hệ thống điểm danh bằng khuôn mặt")
-root.geometry("850x650")
-root.configure(bg="#eaf4fc")
+class LoginFrame(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
 
-# ===============================
-# 🎯 Tiêu đề chính
-# ===============================
-title_label = tk.Label(root, text="HỆ THỐNG ĐIỂM DANH BẰNG KHUÔN MẶT",
-                       bg="#1a73e8", fg="white",
-                       font=("Segoe UI", 16, "bold"), pady=10)
-title_label.pack(fill=tk.X)
+        tk.Label(self, text="HỆ THỐNG ĐIỂM DANH", font=("Segoe UI", 16, "bold")).pack(pady=30)
+        tk.Label(self, text="Chọn vai trò:", font=("Segoe UI", 12)).pack(pady=10)
 
-# ===============================
-# 🧍‍♂️ Khu vực thêm người mới
-# ===============================
-frame_add = tk.LabelFrame(root, text="➕ Thêm người mới", bg="#eaf4fc",
-                          font=("Segoe UI", 12, "bold"), padx=15, pady=10)
-frame_add.pack(padx=20, pady=10, fill=tk.X)
+        ttk.Button(self, text="👨‍💼 Quản trị viên", width=25,
+                   command=self.open_admin_login).pack(pady=5)
+        ttk.Button(self, text="🎓 Sinh viên", width=25,
+                   command=lambda: controller.show_frame(StudentFrame)).pack(pady=5)
 
-lbl_name = tk.Label(frame_add, text="Tên:", bg="#eaf4fc", font=("Segoe UI", 11))
-lbl_name.grid(row=0, column=0, padx=10)
+    def open_admin_login(self):
+        win = tk.Toplevel(self)
+        win.title("Đăng nhập Quản trị viên")
+        win.geometry("300x180")
 
-entry_name = ttk.Entry(frame_add, width=30, font=("Segoe UI", 11))
-entry_name.grid(row=0, column=1, padx=10)
+        tk.Label(win, text="Nhập mật khẩu:", font=("Segoe UI", 11)).pack(pady=10)
+        pw_entry = ttk.Entry(win, show="*", width=25)
+        pw_entry.pack(pady=5)
 
-btn_register = ttk.Button(frame_add, text="📸 Thêm khuôn mặt", command=register_new_face)
-btn_register.grid(row=0, column=2, padx=10)
+        def verify():
+            if pw_entry.get() == ADMIN_PASSWORD:
+                win.destroy()
+                self.controller.show_frame(AdminFrame)
+            else:
+                messagebox.showerror("Lỗi", "Sai mật khẩu!")
 
-# ===============================
-# 🔘 Các nút chức năng chính
-# ===============================
-button_frame = tk.Frame(root, bg="#eaf4fc")
-button_frame.pack(pady=15)
+        ttk.Button(win, text="Đăng nhập", command=verify).pack(pady=10)
 
-style = ttk.Style()
-style.configure("TButton", font=("Segoe UI", 11), padding=6)
-
-btn_start = ttk.Button(button_frame, text="▶ Mở Camera Điểm Danh", command=start_camera)
-btn_start.grid(row=0, column=0, padx=10)
-
-# NOTE: nút "Làm mới danh sách" giờ gọi clear_history (xóa lịch sử).
-btn_refresh = ttk.Button(button_frame, text="🔄 Làm mới danh sách", command=clear_history)
-btn_refresh.grid(row=0, column=1, padx=10)
-
-btn_export = ttk.Button(button_frame, text="💾 Xuất File CSV", command=export_csv)
-btn_export.grid(row=0, column=2, padx=10)
 
 # ===============================
-# 🧾 Bảng danh sách điểm danh
+# 🧭 Giao diện Quản trị viên
 # ===============================
-frame_table = tk.Frame(root, bg="#eaf4fc")
-frame_table.pack(pady=10, fill=tk.BOTH, expand=True)
+class AdminFrame(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
 
-columns = ("Name", "Date", "Time")
-tree = ttk.Treeview(frame_table, columns=columns, show="headings", height=12)
-tree.heading("Name", text="Tên")
-tree.heading("Date", text="Ngày")
-tree.heading("Time", text="Giờ điểm danh")
+        tk.Label(self, text="📋 GIAO DIỆN QUẢN TRỊ VIÊN", font=("Segoe UI", 14, "bold"),
+                 bg="#1a73e8", fg="white", pady=10).pack(fill=tk.X)
 
-# Tăng độ rộng và căn giữa
-tree.column("Name", width=200, anchor="center")
-tree.column("Date", width=150, anchor="center")
-tree.column("Time", width=150, anchor="center")
+        frame_top = tk.LabelFrame(self, text="Thiết lập buổi học", padx=15, pady=10)
+        frame_top.pack(padx=20, pady=10, fill=tk.X)
 
-# Thanh cuộn
-scrollbar = ttk.Scrollbar(frame_table, orient=tk.VERTICAL, command=tree.yview)
-tree.configure(yscroll=scrollbar.set)
-scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-tree.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Chọn môn học
+        tk.Label(frame_top, text="Chọn môn học:", font=("Segoe UI", 11)).grid(row=0, column=0, padx=10, pady=5)
+        self.subject_var = tk.StringVar()
+        self.subject_combo = ttk.Combobox(frame_top, textvariable=self.subject_var, values=subjects, width=30)
+        self.subject_combo.grid(row=0, column=1, padx=10)
+
+        # Giờ bắt đầu – kết thúc
+        tk.Label(frame_top, text="Giờ bắt đầu:", font=("Segoe UI", 11)).grid(row=1, column=0, padx=10, pady=5)
+        self.start_time = ttk.Entry(frame_top, width=10)
+        self.start_time.insert(0, "07:30")
+        self.start_time.grid(row=1, column=1, sticky="w")
+
+        tk.Label(frame_top, text="Giờ kết thúc:", font=("Segoe UI", 11)).grid(row=2, column=0, padx=10, pady=5)
+        self.end_time = ttk.Entry(frame_top, width=10)
+        self.end_time.insert(0, "09:00")
+        self.end_time.grid(row=2, column=1, sticky="w")
+
+        # Các nút điều khiển
+        ttk.Button(frame_top, text="🚀 Bắt đầu buổi học", command=self.start_session).grid(row=3, column=0, pady=10)
+        ttk.Button(frame_top, text="📄 Xem điểm danh", command=self.load_attendance).grid(row=3, column=1, pady=10)
+        ttk.Button(frame_top, text="💾 Xuất file CSV", command=self.export_csv).grid(row=3, column=2, pady=10)
+        ttk.Button(frame_top, text="🗑️ Xóa lịch sử điểm danh", command=self.delete_attendance).grid(row=3, column=3, pady=10)
+        ttk.Button(frame_top, text="↩️ Quay lại đăng nhập",
+                   command=lambda: controller.show_frame(LoginFrame)).grid(row=3, column=4, pady=10)
+
+        self.status_label = tk.Label(self, text="⛔ Chưa có buổi học nào được mở", fg="red", font=("Segoe UI", 11))
+        self.status_label.pack(pady=5)
+
+        # Bảng hiển thị danh sách điểm danh
+        frame_table = tk.Frame(self)
+        frame_table.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        columns = ("Name", "StudentID", "Subject", "Date", "Time")
+        self.tree = ttk.Treeview(frame_table, columns=columns, show="headings", height=15)
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=150, anchor="center")
+
+        scrollbar = ttk.Scrollbar(frame_table, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+
+    # ====== Bắt đầu buổi học ======
+    def start_session(self):
+        subject = self.subject_var.get()
+        start = self.start_time.get()
+        end = self.end_time.get()
+
+        if not subject:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng chọn môn học trước.")
+            return
+
+        ACTIVE_SESSIONS[subject] = {"active": True, "start": start, "end": end}
+        self.status_label.config(text=f"✅ Môn '{subject}' đã mở ({start} - {end})", fg="green")
+        messagebox.showinfo("Thành công", f"Buổi học '{subject}' đã được mở. Sinh viên có thể điểm danh.")
+
+    # ====== Xem danh sách điểm danh ======
+    def load_attendance(self):
+        subject = self.subject_var.get()
+        today = datetime.now().strftime("%Y-%m-%d")
+        path = os.path.join(LOG_DIR, f"log_{subject}_{today}.csv")
+
+        if not os.path.exists(path):
+            messagebox.showinfo("Thông báo", "Chưa có dữ liệu điểm danh cho hôm nay.")
+            return
+
+        df = pd.read_csv(path)
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for _, row in df.iterrows():
+            self.tree.insert("", tk.END, values=tuple(row))
+
+    # ====== Xuất file CSV ======
+    def export_csv(self):
+        subject = self.subject_var.get()
+        today = datetime.now().strftime("%Y-%m-%d")
+        src = os.path.join(LOG_DIR, f"log_{subject}_{today}.csv")
+        if not os.path.exists(src):
+            messagebox.showwarning("Lỗi", "Không có dữ liệu để xuất.")
+            return
+        dest = f"backup_{subject}_{today}.csv"
+        os.system(f'copy "{src}" "{dest}"')
+        messagebox.showinfo("Thành công", f"Đã xuất file: {dest}")
+
+    # ====== 🗑️ Xóa lịch sử điểm danh ======
+    def delete_attendance(self):
+        subject = self.subject_var.get()
+        if not subject:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng chọn môn học để xóa lịch sử.")
+            return
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_path = os.path.join(LOG_DIR, f"log_{subject}_{today}.csv")
+
+        choice = messagebox.askquestion(
+            "Xóa lịch sử",
+            f"Chọn chế độ xóa cho môn '{subject}':\n\n"
+            f"Yes → Xóa lịch sử của HÔM NAY\nNo → Xóa TOÀN BỘ lịch sử môn này\nCancel → Thoát",
+            icon="warning"
+        )
+
+        if choice == "yes":
+            if os.path.exists(today_path):
+                os.remove(today_path)
+                for item in self.tree.get_children():
+                    self.tree.delete(item)
+                messagebox.showinfo("Đã xóa", f"🗑️ Đã xóa lịch sử điểm danh hôm nay của môn '{subject}'.")
+            else:
+                messagebox.showinfo("Thông báo", f"Không có dữ liệu điểm danh hôm nay của '{subject}'.")
+
+        elif choice == "no":
+            deleted = 0
+            for file in os.listdir(LOG_DIR):
+                if file.startswith(f"log_{subject}_") and file.endswith(".csv"):
+                    os.remove(os.path.join(LOG_DIR, file))
+                    deleted += 1
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            messagebox.showinfo("Đã xóa", f"🗑️ Đã xóa {deleted} file lịch sử điểm danh của môn '{subject}'.")
+        else:
+            return
+
 
 # ===============================
-# 📅 Footer
+# 🎓 Giao diện sinh viên (có combobox chọn tên)
 # ===============================
-footer_label = tk.Label(root, text="© 2025 Nhóm 1 - Face Attendance System",
-                        bg="#eaf4fc", fg="#555", font=("Segoe UI", 10))
-footer_label.pack(pady=5)
+class StudentFrame(tk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+
+        tk.Label(self, text="🎓 GIAO DIỆN SINH VIÊN", font=("Segoe UI", 14, "bold"),
+                 bg="#1a73e8", fg="white", pady=10).pack(fill=tk.X)
+
+        frame = tk.LabelFrame(self, text="Thông tin sinh viên", padx=20, pady=20)
+        frame.pack(padx=20, pady=20, fill=tk.X)
+
+        # combobox chọn tên sinh viên từ embeddings
+        tk.Label(frame, text="Họ và tên:", font=("Segoe UI", 11)).grid(row=0, column=0, sticky="w")
+        self.name_var = tk.StringVar()
+        self.name_combo = ttk.Combobox(frame, textvariable=self.name_var, values=student_names,
+                                       width=35, state="readonly")
+        self.name_combo.grid(row=0, column=1, pady=5)
+
+        tk.Label(frame, text="Mã SV:", font=("Segoe UI", 11)).grid(row=1, column=0, sticky="w")
+        self.id_entry = ttk.Entry(frame, width=35)
+        self.id_entry.grid(row=1, column=1, pady=5)
+
+        tk.Label(frame, text="Môn học:", font=("Segoe UI", 11)).grid(row=2, column=0, sticky="w")
+        self.subject_var = tk.StringVar()
+        self.subject_combo = ttk.Combobox(frame, textvariable=self.subject_var, values=subjects,
+                                          width=32, state="readonly")
+        self.subject_combo.grid(row=2, column=1, pady=5)
+
+        ttk.Button(self, text="📸 Điểm danh", command=self.start_face_recognition).pack(pady=15)
+        ttk.Button(self, text="↩️ Quay lại đăng nhập",
+                   command=lambda: controller.show_frame(LoginFrame)).pack(pady=5)
+
+    # ====== Hàm điểm danh ======
+    def start_face_recognition(self):
+        subject = self.subject_var.get()
+        name = self.name_var.get().strip()
+        student_id = self.id_entry.get().strip()
+
+        if not all([subject, name, student_id]):
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập đầy đủ thông tin và chọn môn học.")
+            return
+
+        session_info = ACTIVE_SESSIONS.get(subject, {"active": False, "start": None, "end": None})
+        if not session_info["active"]:
+            messagebox.showerror("⛔ Chưa đến thời gian", f"Môn '{subject}' chưa được mở để điểm danh.")
+            return
+
+        # 🕒 Kiểm tra giờ hiện tại so với giờ học
+        now_time = datetime.now().strftime("%H:%M")
+        start_time = session_info["start"]
+        end_time = session_info["end"]
+
+        if now_time < start_time:
+            messagebox.showwarning("⏰ Chưa tới giờ điểm danh",
+                                   f"Buổi học '{subject}' bắt đầu lúc {start_time}. Vui lòng chờ đến giờ.")
+            return
+
+        if now_time > end_time:
+            messagebox.showerror("⛔ Quá giờ điểm danh",
+                                 f"Buổi học '{subject}' đã kết thúc lúc {end_time}. Không thể điểm danh nữa.")
+            return
+
+        messagebox.showinfo("Điểm danh", f"Camera đang mở cho môn {subject}. Nhấn Q để thoát.")
+        recognized_name = start_attendance()
+
+        if recognized_name == "unknown" or recognized_name == "Không xác định":
+            messagebox.showerror("❌ Thất bại", "Không nhận diện được khuôn mặt hợp lệ.")
+            return
+
+        if recognized_name.lower() != name.lower():
+            messagebox.showwarning("Sai tên",
+                                   f"Khuôn mặt nhận diện là '{recognized_name}', "
+                                   f"nhưng bạn chọn '{name}'. Vui lòng chọn đúng tên đã đăng ký.")
+            return
+
+        now = datetime.now()
+        date, time = now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+        log_path = os.path.join(LOG_DIR, f"log_{subject}_{date}.csv")
+
+        df = pd.DataFrame([[name, student_id, subject, date, time]],
+                          columns=["Name", "StudentID", "Subject", "Date", "Time"])
+        if os.path.exists(log_path):
+            old_df = pd.read_csv(log_path)
+            df = pd.concat([old_df, df], ignore_index=True)
+        df.to_csv(log_path, index=False)
+
+        messagebox.showinfo("Thành công", f"✅ {name} ({student_id}) đã điểm danh môn {subject} thành công!")
+
 
 # ===============================
-# 🚀 Chạy ứng dụng
+# 🚀 Chạy chương trình
 # ===============================
-update_table()
-root.mainloop()
+if __name__ == "__main__":
+    app = AttendanceApp()
+    app.mainloop()

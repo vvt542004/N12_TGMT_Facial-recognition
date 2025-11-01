@@ -1,125 +1,191 @@
-import cv2
-import face_recognition
-import numpy as np
 import os
+import cv2
+import numpy as np
+import pickle
 import pandas as pd
 from datetime import datetime
+from mtcnn import MTCNN
+from deepface import DeepFace
 
 # ===============================
-# ⚙️ Ghi lịch sử điểm danh (chống spam)
+# ⚙️ Cấu hình hệ thống
+# ===============================
+MODEL_DIR = "face_models_facenet"
+SVM_PATH = os.path.join(MODEL_DIR, "svm_facenet.pkl")
+LABEL_ENCODER_PATH = os.path.join(MODEL_DIR, "label_encoder_facenet.pkl")
+EMBEDDINGS_NPZ = os.path.join(MODEL_DIR, "faces_embeddings_facenet.npz")
+
+SVM_PROB_THRESH = 0.75
+COSINE_SIM_THRESH = 0.5
+FRAMES_REQUIRED = 3
+DELAY_SECONDS = 30
+
+# ===============================
+# 🧠 Tải mô hình
+# ===============================
+print("📦 Đang tải mô hình SVM và LabelEncoder...")
+
+with open(SVM_PATH, "rb") as f:
+    svm_model = pickle.load(f)
+with open(LABEL_ENCODER_PATH, "rb") as f:
+    label_encoder = pickle.load(f)
+
+print("✅ Mô hình đã sẵn sàng.")
+
+# ===============================
+# 🧩 Tải embeddings đã lưu (nếu có)
+# ===============================
+embeddings_by_label = {}
+if os.path.exists(EMBEDDINGS_NPZ):
+    try:
+        npz = np.load(EMBEDDINGS_NPZ, allow_pickle=True)
+        X = npz["embeddings"]
+        y = npz["labels"]
+        X_norm = X / np.linalg.norm(X, axis=1, keepdims=True)
+        for emb, lbl in zip(X_norm, y):
+            embeddings_by_label.setdefault(lbl, []).append(emb)
+
+        print(f"✅ Đã tải embeddings của {len(embeddings_by_label)} lớp.")
+        # 🟢 In danh sách tên lớp (và số lượng ảnh mỗi lớp)
+        print("📂 Danh sách lớp đã tải:")
+        for lbl, embs in embeddings_by_label.items():
+            print(f"   - {lbl}: {len(embs)} ảnh")
+
+    except Exception as e:
+        print("⚠️ Không thể tải file embeddings:", e)
+else:
+    print("⚠️ Không tìm thấy file embeddings, chỉ dùng SVM để nhận diện.")
+
+detector = MTCNN()
+
+# ===============================
+# 🧩 Hàm phụ trợ
+# ===============================
+def l2_normalize(v):
+    v = np.array(v)
+    norm = np.linalg.norm(v)
+    return v / norm if norm > 0 else v
+
+def mean_cosine_sim(emb, label):
+    if label not in embeddings_by_label:
+        return 0.0
+    arr = np.stack(embeddings_by_label[label], axis=0)
+    sims = np.dot(arr, emb)
+    return float(np.mean(sims))
+
+# ===============================
+# 🕒 Lưu lịch sử điểm danh
 # ===============================
 last_mark_times = {}
-DELAY_SECONDS = 30  # Khoảng cách tối thiểu giữa 2 lần lưu (giây)
 
 def mark_attendance(name):
-    """Ghi lịch sử điểm danh vào file CSV"""
-    global last_mark_times
-
     now = datetime.now()
     date = now.strftime('%Y-%m-%d')
     time = now.strftime('%H:%M:%S')
 
-    # Chống spam trong thời gian ngắn
     if name in last_mark_times:
         delta = (now - last_mark_times[name]).total_seconds()
         if delta < DELAY_SECONDS:
             return
     last_mark_times[name] = now
 
-    file = 'attendance.csv'
+    file = "attendance.csv"
     if not os.path.exists(file) or os.path.getsize(file) == 0:
         df = pd.DataFrame(columns=["Name", "Date", "Time"])
         df.to_csv(file, index=False)
 
-    try:
-        df = pd.read_csv(file)
-    except pd.errors.EmptyDataError:
-        df = pd.DataFrame(columns=["Name", "Date", "Time"])
-
+    df = pd.read_csv(file)
     new_row = pd.DataFrame([[name, date, time]], columns=["Name", "Date", "Time"])
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(file, index=False)
-
     print(f"✅ Đã lưu điểm danh: {name} ({date} {time})")
 
 # ===============================
-# 🎥 Nhận diện & điểm danh
+# 🎥 Nhận diện khuôn mặt
 # ===============================
 def start_attendance():
-    path = 'dataset'
-    if not os.path.exists(path) or len(os.listdir(path)) == 0:
-        print("⚠ Thư mục dataset trống. Hãy thêm khuôn mặt trước.")
-        return
-
-    print("📂 Đang tải dataset...")
-    encode_dict = {}  # { 'tuan': [encode1, encode2, ...], ... }
-
-    for filename in os.listdir(path):
-        file_path = os.path.join(path, filename)
-        if not filename.lower().endswith(('.jpg', '.png', '.jpeg')):
-            continue
-
-        name = os.path.splitext(filename)[0].split('_')[0]  # tách tên trước dấu _
-        img = cv2.imread(file_path)
-        if img is None:
-            continue
-
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encodes = face_recognition.face_encodings(rgb)
-        if len(encodes) > 0:
-            encode_dict.setdefault(name, []).append(encodes[0])
-
-    print(f"✅ Đã tải {len(encode_dict)} người: {list(encode_dict.keys())}")
-
+    print("🎥 Đang mở camera... (nhấn Q để thoát)")
     cap = cv2.VideoCapture(0)
-    print("🎥 Camera đang mở. Nhấn Q để thoát.")
+    if not cap.isOpened():
+        print("❌ Không thể mở camera.")
+        return "unknown"
 
-    threshold = 0.35 # càng thấp thì càng khắt khe
+    DeepFace.build_model("Facenet")
+    recognized_name = "unknown"
+    frame_confirm = {}
 
     while True:
-        success, img = cap.read()
-        if not success:
-            print("❌ Không thể mở camera.")
+        ret, frame = cap.read()
+        if not ret:
             break
 
-        imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
-        imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        faces = detector.detect_faces(rgb)
 
-        facesCurFrame = face_recognition.face_locations(imgS)
-        encodesCurFrame = face_recognition.face_encodings(imgS, facesCurFrame)
+        for f in faces:
+            x, y, w, h = f["box"]
+            x, y = max(0, x), max(0, y)
+            face = rgb[y:y + h, x:x + w]
+            if face.size == 0:
+                continue
 
-        for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
-            best_name = "Không xác định"
-            min_distance = 1.0
+            try:
+                rep = DeepFace.represent(img_path=face, model_name="Facenet", enforce_detection=False)
+                emb = l2_normalize(np.array(rep[0]["embedding"]))
+            except Exception:
+                continue
 
-            # So sánh với từng người
-            for name, encodes in encode_dict.items():
-                distances = face_recognition.face_distance(encodes, encodeFace)
-                avg_distance = np.mean(distances)
-                if avg_distance < min_distance:
-                    min_distance = avg_distance
-                    best_name = name
+            probs = svm_model.predict_proba([emb])[0]
+            max_prob = float(np.max(probs))
+            pred_idx = np.argmax(probs)
+            pred_name = label_encoder.inverse_transform([pred_idx])[0]
+            avg_sim = mean_cosine_sim(emb, pred_name) if embeddings_by_label else 0.0
 
-            # Kiểm tra ngưỡng
-            if min_distance < threshold:
-                color = (0, 255, 0)
-                mark_attendance(best_name)
+            recognized = (max_prob >= SVM_PROB_THRESH) and (avg_sim >= COSINE_SIM_THRESH)
+            name_display = pred_name if recognized else "unknown"
+            color = (0, 255, 0) if recognized else (0, 0, 255)
+
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(frame, f"{name_display} ({max_prob:.2f})", (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+
+            # ✅ Nếu xác nhận hợp lệ qua nhiều frame → điểm danh + tắt camera
+            if recognized:
+                count, last_time = frame_confirm.get(pred_name, (0, datetime.min))
+                if (datetime.now() - last_time).total_seconds() < 2:
+                    count += 1
+                else:
+                    count = 1
+                frame_confirm[pred_name] = (count, datetime.now())
+
+                if count >= FRAMES_REQUIRED:
+                    recognized_name = pred_name
+                    mark_attendance(pred_name)
+
+                    # Hiển thị thông báo điểm danh thành công
+                    cv2.putText(frame, f"Diem danh thanh cong: {pred_name}",
+                                (x, y + h + 30), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0, 255, 0), 2)
+                    cv2.imshow("Face Attendance (Facenet + SVM)", frame)
+                    print(f"✅ Điểm danh thành công cho {pred_name}")
+
+                    # 🟢 Chờ 1.5 giây rồi tắt camera
+                    cv2.waitKey(1500)
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return recognized_name
             else:
-                best_name = "Không xác định"
-                color = (0, 0, 255)
+                recognized_name = "unknown"
 
-            # Vẽ khung
-            y1, x2, y2, x1 = faceLoc
-            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), color, cv2.FILLED)
-            cv2.putText(img, best_name.upper(), (x1 + 6, y2 - 6),
-                        cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
-
-        cv2.imshow('Face Attendance', img)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        cv2.imshow("Face Attendance (Facenet + SVM)", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
-    print("👋 Đã đóng camera.")
+
+    if recognized_name != "unknown":
+        return recognized_name
+    else:
+        print("❌ Không nhận diện được khuôn mặt hợp lệ.")
+        return "unknown"

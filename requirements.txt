@@ -1,0 +1,12 @@
+tensorflow==2.15.0
+keras==2.15.0
+numpy==1.26.4
+opencv-python==4.8.1.78
+protobuf==4.23.4
+tensorboard==2.15.0
+ml-dtypes==0.2.0
+deepface==0.0.79
+pandas==2.2.2
+scikit-learn==1.4.2
+pillow==10.3.0
+mtcnn==0.1.1
