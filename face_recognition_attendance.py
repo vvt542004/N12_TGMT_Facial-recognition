@@ -15,7 +15,7 @@ SVM_PATH = os.path.join(MODEL_DIR, "svm_facenet.pkl")
 LABEL_ENCODER_PATH = os.path.join(MODEL_DIR, "label_encoder_facenet.pkl")
 EMBEDDINGS_NPZ = os.path.join(MODEL_DIR, "faces_embeddings_facenet.npz")
 
-SVM_PROB_THRESH = 0.75
+SVM_PROB_THRESH = 0.45
 COSINE_SIM_THRESH = 0.5
 FRAMES_REQUIRED = 3
 DELAY_SECONDS = 30
@@ -146,7 +146,7 @@ def start_attendance():
             color = (0, 255, 0) if recognized else (0, 0, 255)
 
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(frame, f"{name_display} ({max_prob:.2f})", (x, y - 10),
+            cv2.putText(frame,name_display, (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
             # ✅ Nếu xác nhận hợp lệ qua nhiều frame → điểm danh + tắt camera
