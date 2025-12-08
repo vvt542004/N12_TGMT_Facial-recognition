@@ -6,23 +6,19 @@ import os
 from datetime import datetime
 from face_recognition_attendance import start_attendance
 
-# ===============================
-# ⚙️ Cấu hình hệ thống
-# ===============================
+#  Cấu hình hệ thống
 ADMIN_PASSWORD = "admin123"
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-subjects = ["Xử lý ảnh", "Nhúng IoT", "Thị giác máy tính", "AI cơ bản"]
+subjects = ["Xử lý ngôn ngữ tự nhiên", "Hệ nhúng", "Thị giác máy tính", "Lập trình song song"]
 MODEL_DIR = "face_models_facenet"
 EMBEDDINGS_NPZ = os.path.join(MODEL_DIR, "faces_embeddings_facenet.npz")
 
-# Lưu trạng thái từng môn học
 ACTIVE_SESSIONS = {s: {"active": False, "start": None, "end": None} for s in subjects}
 
-# ===============================
-# 📂 Đọc danh sách sinh viên từ embeddings
-# ===============================
+#  Đọc danh sách sinh viên từ embeddings
+
 student_names = []
 if os.path.exists(EMBEDDINGS_NPZ):
     try:
@@ -37,10 +33,8 @@ if os.path.exists(EMBEDDINGS_NPZ):
 else:
     print("⚠️ Không tìm thấy file embeddings.")
 
+#  Ứng dụng chính (1 cửa sổ, nhiều frame)
 
-# ===============================
-# 🌟 Ứng dụng chính (1 cửa sổ, nhiều frame)
-# ===============================
 class AttendanceApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -63,9 +57,7 @@ class AttendanceApp(tk.Tk):
         self.frames[cont].tkraise()
 
 
-# ===============================
-# 📘 Giao diện đăng nhập
-# ===============================
+#  Giao diện đăng nhập
 class LoginFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -98,9 +90,9 @@ class LoginFrame(tk.Frame):
         ttk.Button(win, text="Đăng nhập", command=verify).pack(pady=10)
 
 
-# ===============================
-# 🧭 Giao diện Quản trị viên
-# ===============================
+
+#  Giao diện Quản trị viên
+
 class AdminFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -197,7 +189,7 @@ class AdminFrame(tk.Frame):
         os.system(f'copy "{src}" "{dest}"')
         messagebox.showinfo("Thành công", f"Đã xuất file: {dest}")
 
-    # ====== 🗑️ Xóa lịch sử điểm danh ======
+    # ====== Xóa lịch sử điểm danh ======
     def delete_attendance(self):
         subject = self.subject_var.get()
         if not subject:
@@ -235,10 +227,8 @@ class AdminFrame(tk.Frame):
         else:
             return
 
-
-# ===============================
 # 🎓 Giao diện sinh viên (có combobox chọn tên)
-# ===============================
+
 class StudentFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
@@ -286,7 +276,7 @@ class StudentFrame(tk.Frame):
             messagebox.showerror("⛔ Chưa đến thời gian", f"Môn '{subject}' chưa được mở để điểm danh.")
             return
 
-        # 🕒 Kiểm tra giờ hiện tại so với giờ học
+        #  Kiểm tra giờ hiện tại so với giờ học
         now_time = datetime.now().strftime("%H:%M")
         start_time = session_info["start"]
         end_time = session_info["end"]
@@ -328,9 +318,7 @@ class StudentFrame(tk.Frame):
         messagebox.showinfo("Thành công", f"✅ {name} ({student_id}) đã điểm danh môn {subject} thành công!")
 
 
-# ===============================
-# 🚀 Chạy chương trình
-# ===============================
+
 if __name__ == "__main__":
     app = AttendanceApp()
     app.mainloop()

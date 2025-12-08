@@ -7,9 +7,6 @@ from datetime import datetime
 from mtcnn import MTCNN
 from deepface import DeepFace
 
-# ===============================
-# ⚙️ Cấu hình hệ thống
-# ===============================
 MODEL_DIR = "face_models_facenet"
 SVM_PATH = os.path.join(MODEL_DIR, "svm_facenet.pkl")
 LABEL_ENCODER_PATH = os.path.join(MODEL_DIR, "label_encoder_facenet.pkl")
@@ -20,21 +17,18 @@ COSINE_SIM_THRESH = 0.5
 FRAMES_REQUIRED = 3
 DELAY_SECONDS = 30
 
-# ===============================
-# 🧠 Tải mô hình
-# ===============================
-print("📦 Đang tải mô hình SVM và LabelEncoder...")
+print(" Đang tải mô hình...")
 
 with open(SVM_PATH, "rb") as f:
     svm_model = pickle.load(f)
 with open(LABEL_ENCODER_PATH, "rb") as f:
     label_encoder = pickle.load(f)
 
-print("✅ Mô hình đã sẵn sàng.")
+print(" Mô hình đã sẵn sàng.")
 
-# ===============================
-# 🧩 Tải embeddings đã lưu (nếu có)
-# ===============================
+
+# Tải embeddings đã lưu
+
 embeddings_by_label = {}
 if os.path.exists(EMBEDDINGS_NPZ):
     try:
@@ -45,22 +39,20 @@ if os.path.exists(EMBEDDINGS_NPZ):
         for emb, lbl in zip(X_norm, y):
             embeddings_by_label.setdefault(lbl, []).append(emb)
 
-        print(f"✅ Đã tải embeddings của {len(embeddings_by_label)} lớp.")
-        # 🟢 In danh sách tên lớp (và số lượng ảnh mỗi lớp)
-        print("📂 Danh sách lớp đã tải:")
+        print(f" Đã tải embeddings của {len(embeddings_by_label)} lớp.")
+        print(" Danh sách lớp đã tải:")
         for lbl, embs in embeddings_by_label.items():
             print(f"   - {lbl}: {len(embs)} ảnh")
 
     except Exception as e:
-        print("⚠️ Không thể tải file embeddings:", e)
+        print(" Không thể tải file embeddings:", e)
 else:
-    print("⚠️ Không tìm thấy file embeddings, chỉ dùng SVM để nhận diện.")
+    print(" Không tìm thấy file embeddings, chỉ dùng SVM để nhận diện.")
 
 detector = MTCNN()
 
-# ===============================
-# 🧩 Hàm phụ trợ
-# ===============================
+# Hàm phụ trợ
+
 def l2_normalize(v):
     v = np.array(v)
     norm = np.linalg.norm(v)
@@ -73,9 +65,9 @@ def mean_cosine_sim(emb, label):
     sims = np.dot(arr, emb)
     return float(np.mean(sims))
 
-# ===============================
-# 🕒 Lưu lịch sử điểm danh
-# ===============================
+
+#lịch sử điểm danh
+
 last_mark_times = {}
 
 def mark_attendance(name):
@@ -98,16 +90,15 @@ def mark_attendance(name):
     new_row = pd.DataFrame([[name, date, time]], columns=["Name", "Date", "Time"])
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(file, index=False)
-    print(f"✅ Đã lưu điểm danh: {name} ({date} {time})")
+    print(f" Đã lưu điểm danh: {name} ({date} {time})")
 
-# ===============================
-# 🎥 Nhận diện khuôn mặt
-# ===============================
+
+# Nhận diện khuôn mặt
 def start_attendance():
-    print("🎥 Đang mở camera... (nhấn Q để thoát)")
+    print(" Đang mở camera... (nhấn Q để thoát)")
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print("❌ Không thể mở camera.")
+        print(" Không thể mở camera.")
         return "unknown"
 
     DeepFace.build_model("Facenet")
@@ -149,7 +140,7 @@ def start_attendance():
             cv2.putText(frame,name_display, (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-            # ✅ Nếu xác nhận hợp lệ qua nhiều frame → điểm danh + tắt camera
+            #  Nếu xác nhận hợp lệ qua nhiều frame → điểm danh + tắt camera
             if recognized:
                 count, last_time = frame_confirm.get(pred_name, (0, datetime.min))
                 if (datetime.now() - last_time).total_seconds() < 2:
@@ -166,10 +157,9 @@ def start_attendance():
                     cv2.putText(frame, f"Diem danh thanh cong: {pred_name}",
                                 (x, y + h + 30), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.7, (0, 255, 0), 2)
-                    cv2.imshow("Face Attendance (Facenet + SVM)", frame)
-                    print(f"✅ Điểm danh thành công cho {pred_name}")
+                    cv2.imshow("Face Attendance", frame)
+                    print(f" Điểm danh thành công cho {pred_name}")
 
-                    # 🟢 Chờ 1.5 giây rồi tắt camera
                     cv2.waitKey(1500)
                     cap.release()
                     cv2.destroyAllWindows()
@@ -177,7 +167,7 @@ def start_attendance():
             else:
                 recognized_name = "unknown"
 
-        cv2.imshow("Face Attendance (Facenet + SVM)", frame)
+        cv2.imshow("Face Attendance", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
@@ -187,5 +177,5 @@ def start_attendance():
     if recognized_name != "unknown":
         return recognized_name
     else:
-        print("❌ Không nhận diện được khuôn mặt hợp lệ.")
+        print(" Không nhận diện được khuôn mặt hợp lệ.")
         return "unknown"
